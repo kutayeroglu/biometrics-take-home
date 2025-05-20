@@ -1,0 +1,245 @@
+\documentclass[10pt,a4paper,twoside]{article}
+\usepackage[english]{babel}
+%laad de pakketten nodig om wiskunde weer te geven :
+\usepackage{amsmath,amssymb,amsfonts,textcomp}
+%laad de pakketten voor figuren :
+\usepackage{graphicx}
+\usepackage{float,flafter}
+\usepackage{hyperref}
+\usepackage{inputenc}
+\usepackage{comment}
+\usepackage{cleveref}
+%zet de bladspiegel :
+\setlength\paperwidth{20.999cm}\setlength\paperheight{29.699cm}\setlength\voffset{-1in}\setlength\hoffset{-1in}\setlength\topmargin{1.499cm}\setlength\headheight{12pt}\setlength\headsep{0cm}\setlength\footskip{1.131cm}\setlength\textheight{25cm}\setlength\oddsidemargin{2.499cm}\setlength\textwidth{15.999cm}
+
+\begin{document}
+\begin{center}
+
+\hrule
+\vspace{.4cm}
+{\bf {\Huge CMPE 58Z Introduction to Biometrics: 
+Spring 2025 Midterm Take-Home Exam}}
+\vspace{.2cm}
+\end{center}
+{\bf Kutay Eroğlu}, 2024700051 (kutay.eroglu@std.bogazici.edu.tr)  
+\hspace{\fill} 18 May 2025 \\
+\hrule
+
+\section{Introduction}
+
+Face recognition is the task of identifying a face using a database of faces. This task is divided into two categories. If there is a claimed identity, meaning that there is a one-to-one decision to verify whether the person matches the claimed identity, the task is called face verification. On the other hand, if the decision is one-to-many, meaning that there is no claimed identity, the task is called face identification.
+
+The focus of the study is to evaluate two state-of-the-art face recognition algorithms for face verification on the Labeled Faces in the Wild (LFW) dataset \cite{lfw_dataset}. Selected methods are: ArcFace \cite{arcface}, and SFace \cite{sface}. 
+
+The outline is as follows. Firstly, information about the evaluation dataset is presented. Then, methodology of the selected works is discussed in depth. Evaluation metrics, including the F1-score, classification accuracy, ROC AUC, and confusion matrix, are presented in Section~\ref{sec:eval}. Following the metrics, misclassified examples for both methods are presented, accompanied by a brief commentary. Finally, additional remarks are included to provide further insight into the implementation of the evaluation protocol.
+
+\subsection{LFW Dataset}
+
+The Labeled Faces in the Wild (LFW) dataset \cite{lfw_dataset} is a database of more than 13,000 face images of 5,749 individuals collected from the internet. Images are unconstrained, in the sense that conditions that affect the characteristic of an image such as lighting, background, pose, and camera setup are not controlled. There are two common configurations of the dataset: people and pairs. Since this study focuses on evaluating methods for face verification, the latter--which includes labeled image pairs--was selected.
+
+
+\section{ArcFace}
+
+\subsection{Overview}
+A commonly utilized function in deep face recognition tasks is the loss, which is presented in Figure~\ref{fig:arc_softmax}. One downside of this function for our task is the lack of optimization of feature embeddings to impose inter-class diversity, or intra-class compactness, which leads to drop in performance under large-scale tests, and intra-class variations (e.g., pose, age gaps).
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{figures/arcface/softmax.png} 
+    \caption{Softmax loss function. Source: Adapted from \cite{arcface}.}
+    \label{fig:arc_softmax}
+\end{figure}
+
+To simplify the softmax function, bias is fixed \(b_j = 0\). Following this, the logit is transformed as \( W_j^\top x_i = \|W_j\| \|x_i\| \cos \theta_j \). (\( \theta_j \) corresponds to the angle between feature \( x_i \) and  weight \( W_j \)). The individual weight \(\|W_j\|\) is fixed to 1 using \(L2\) normalization. In addition to this, the embedding feature \(\|x_i\|\) is fixed by \(L2\) normalization and re-scaled to \(s\). As a result of normalizing the weights and features, predictions depend solely on the angle between the weight and the feature. This version of the loss is referred to as \texttt{Norm-Softmax}, for which the equation is presented in Figure~\ref{fig:norm-softmax}.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{figures/arcface/norm-softmax.png} 
+    \caption{Norm-Softmax loss function. Source: Adapted from \cite{arcface}.}
+    \label{fig:norm-softmax}
+\end{figure}
+
+To increase compactness of intra-class samples and discrepancy of inter-class samples, an additive angular margin penalty \(m\) is introduced between \(x_i\) and \(W_{y_i}\). The rationale behind this decision is that embedding features are spread around the central points of each feature on the hypersphere. The loss obtained as a product of these modifications is referred to as \texttt{ArcFace}, with the formal equation depicted in Figure~\ref{fig:ArcFaceLoss}.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{figures/arcface/arcface-loss.png} 
+    \caption{ArcFace loss function. Source: Adapted from \cite{arcface}.}
+    \label{fig:ArcFaceLoss}
+\end{figure}
+
+To compare the ability to enforce margins between nearest classes, 2-D feature embedding networks were trained with \texttt{Norm-Softmax} and \texttt{ArcFace} loss. Based on feature normalization introduced in \texttt{Norm-Softmax}, all face features are spread around the arc space, as illustrated in Figure~\ref{fig:arc_f3}. However, despite being able to generate separable feature embeddings, \texttt{Norm-Softmax} introduces significant ambiguity in decision boundaries. In contrast, as presented in Figure~\ref{fig:arc_f3}, \texttt{ArcFace} is able to introduce a considerable margin between the nearest classes.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/arcface/arc_f3.png} 
+    \caption{Comparison of Norm-Softmax and ArcFace loss on 8 identities with 2D features. Samples are represented with dots, while center direction of each identity corresponds to the lines. Source: Adapted from \cite{arcface}.}
+    \label{fig:arc_f3}
+\end{figure}
+
+\subsection{Numerical Stability}
+
+To obtain various high-performance target logit curves (shown in Figure~\ref{fig:arc_f4b}), two distinct margin penalties are combined with \texttt{ArcFace}: multiplicative angular ($m_1$)\cite{liu2017sphereface, liu2016large} and additive cosine ($m_3$)\cite{wang2018cosface, wang2018additive}. This combined framework results in the loss illustrated in Figure ~\ref{fig:combined_margin} where $m_1$, $m_2$, $m_3$ are hyperparameters, and ($\cos(m_1\theta + m_2) - m_3$) corresponds to the unified margins.
+
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/arcface/arc_f4b.png} 
+    \caption{Target logit curves for softmax, relevant works, ArcFace, and combined margin penalty. Source: Adapted from \cite{arcface}.}
+    \label{fig:arc_f4b}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/arcface/combined-frame.png} 
+    \caption{Combined margin loss. Source: Adapted from \cite{arcface}.}
+    \label{fig:combined_margin}
+\end{figure}
+
+
+\subsection{Geometric Difference}
+
+While \texttt{ArcFace} and prior methods are numerically similar, the proposed additive angular margin \(m\) improves the geometric attribute, due to direct correlation with the geodesic distance\cite{wiki:geodesic}. This improvement is made more evident by comparing the decision boundaries of \texttt{ArcFace} and prior methods in the binary classification setting, as shown in Figure~\ref{fig:arc_f5}.
+
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/arcface/arc_f5.png} 
+    \caption{Decision margins of ArcFace loss and prior methods under binary classification setting. The decision boundary is represented by the dashed line, while the decision margins are shown as grey areas. Source: Adapted from \cite{arcface}.}
+    \label{fig:arc_f5}
+\end{figure}
+
+
+\section{SFace}
+
+\subsection{Overview}
+
+To optimize inter-class and intra-class distances to some degree, and improve the generalization capability of face recognition models, a novel loss function called sigmoid-constrained hypersphere loss (SFace\cite{sface}) is proposed by the authors. Building on prior work \cite{arcface, liu2017sphereface, wang2018cosface} which demonstrated the benefits of enforcing discrimination by deep face features on a hypersphere manifold, this approach restricts the direction of gradients by mapping deep face features to a hypersphere manifold, and optimizing cosine similarity. This restriction enforces the moving directions of target centers and samples to always be along the tangent of the hypersphere, as illustrated in Fig~\ref{fig:sface_f1}.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/sface/sface_fig1.png} 
+    \caption{Visualization of the sigmoid-constrained hypersphere loss. Source: Adapted from \cite{sface}.}
+    \label{fig:sface_f1}
+\end{figure}
+
+
+\subsection{Sigmoid-Constrained Hypersphere Loss}
+
+Given that the embedding of the i-th training sample in \textit{d}-dimensional Euclidean space is denoted by \( \mathbf{x}_i \) \( \in \mathbb{R}^d \); label of \( \mathbf{x}_i \) by \( \mathbf{y}_i \); weight of the last fully connected layer by \( W = \{W_1, W_2, \ldots, W_C\} \in \mathbb{R}^{d \times C} \), where the number of identities included in training is denoted by C; target center feature of identity \( \mathbf{y}_i \) is represented by \( W \, y_i \in \mathbb{R}^d \).
+
+Since the primary goal is to increase inter-class distance and decrease the intra-class distance in a moderate manner, formulation of sigmoid-constrained hypersphere loss (SFace) of \( \mathbf{x}_i \) can be viewed as \( \text{LSFace} = L_{\text{intra}} \, (\theta_{y_i}) + L_{\text{inter}} \, (\theta_j) \), \( \theta_{y_i} \) representing the angular distance between \( \mathbf{x}_i \) and \( W \, y_i \); \( \theta_{j} \), the angular distance between \( \mathbf{x}_i \) and \( W \, j \), under the condition that \( j \neq y_i \). The formulation of \(L_{\text{intra}} (\theta_{y_i}) \) and \( L_{\text{inter}} (\theta_j) \) is presented in Figure~\ref{fig:linterlintra}.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/sface/sface_l-inter_l-intra.png} 
+    \caption{Intra-class and inter-class loss formulas. Source: Adapted from \cite{sface}.}
+    \label{fig:linterlintra}
+\end{figure}
+
+The degree of control over the optimization speed, illustrated by the 2-D graphs in Figure~\ref{fig:sface_f1}, for intra-class and inter-class respectively, is enhanced by the introduction of two functions: \( r_{\text{intra}} (\theta_{y_i}) \) and \( r_{\text{inter}} (\theta_j) \). 
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/sface/sface_back.png} 
+    \caption{Backward propagation process of SFace. Source: Adapted from \cite{sface}.}
+    \label{fig:sface_back}
+\end{figure}
+
+These functions are used to re-scale intra-class and inter-class objectives respectively. Both functions are modulated using the block gradient operator \( [\cdot]_b \), which works as a unit that blocks the contribution of its input to the gradient computation. For clarity, the backward propagation process is presented in Figure~\ref{fig:sface_back} which shows the effect of block gradient operator on intra-class and inter-class re-scaling functions.
+
+
+\subsection{Gradient Re-Scale Function}
+
+The chosen gradient re-scaling functions are presented in Figure~\ref{fig:sface_gradscale}, where the upper asymptote of the two sigmoid curves is denoted by \( s \); control parameter for slope of the sigmoid curves by \( k \); parameters that suppress moving speed by controlling the horizontal intercept of the two sigmoid curves by \( a \) and \( b \). It should be noted that \( a \) and \( b \) are vital parameters that affect the performance of the model, and should be selected based on the training set characteristics.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{figures/sface/sface_grad.png} 
+    \caption{Intra-class and inter-class gradient re-scaling functions. Source: Adapted from \cite{sface}.}
+    \label{fig:sface_gradscale}
+\end{figure}
+
+
+\section{Evaluation Metrics}
+\label{sec:eval}
+Experiments demonstrate that aligning input face images improves the recognition accuracy by 6\% \cite{deepface}. Therefore, models were evaluated with and without face alignment. Consequently, 4 sets of metrics were obtained. For each model, only the best-performing option is presented. For ArcFace \cite{arcface}, face alignment on input images improved performance metrics, whereas for SFace \cite{sface}, it had the opposite effect.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.3\textwidth]{figures/metrics/classification_accuracy.png} 
+    \caption{Comparison of classification accuracies}
+    \label{fig:clf_acc}
+\end{figure}
+
+Both methods \cite{arcface, sface} report accuracy that exceeds 99.5\% on the same dataset, in their original works. However, as shown in Figure~\ref{fig:clf_acc}, both methods exhibit significantly lower performance in our evaluation. There are two primary factors that contribute to this discrepancy. 
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/metrics/conf_arcface_align.png} 
+    \caption{Confusion Matrix for Arcface with face alignment}
+    \label{fig:conf_arcface}
+\end{figure}
+
+First, the evaluation procedure differs: While the standard protocol for evaluation on LFW involves 10-fold cross-validation, our setup utilizes only a single fold retrieved via \texttt{sklearn.datasets.fetch\_lfw\_pairs} \cite{scikit-learn}. Second, there are differences in the overall face recognition pipeline due to our dependence on implementation of Serengil et. al \cite{deepface}, which can substantially impact performance.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/metrics/conf_sface_nalign.png} 
+    \caption{Confusion Matrix for SFace without face alignment}
+    \label{fig:conf_sface}
+\end{figure}
+
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/metrics/roc+f1.png} 
+    \caption{ROC Curve and F1-score for best performing models}
+    \label{fig:roc_f1}
+\end{figure}
+
+
+The confusion matrices presented in \cref{fig:conf_arcface,fig:conf_sface}, along with Figure \ref{fig:roc_f1}—which displays AUC values of 0.99 and 0.96, and F1-scores of 0.96 and 0.90 for ArcFace \cite{arcface} and SFace \cite{sface}, respectively—show that both models perform reasonably well in the evaluation set. Nonetheless, the performance drop for both methods, specifically SFace\cite{sface}, could be investigated to gain more information on the entire facial recognition pipeline.
+
+
+\section{Misclassified Examples}
+Even though there are multiple pairs that are misclassified by both methods, disjoint sets were selected to improve the diversity of the examples. All misclassified pairs, presented in \cref{fig:miss_arc_1,fig:miss_arc_2,fig:miss_sf_1,fig:miss_sf_2}, exhibit common attributes. Subjectively, the most apparent of these is the variation in pose. In addition, skin color also varies, possibly due to differences in illumination. All of these variations increase the complexity of the task, increasing the possibility of an instance being misclassified.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/misclassified_samples/arcface_align/arcface_1.drawio.png} 
+    \caption{Example misclassified sample pair for Arcface with input alignment}
+    \label{fig:miss_arc_1}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/misclassified_samples/arcface_align/arcface_2.png} 
+    \caption{Example misclassified sample pair for Arcface with input alignment}
+    \label{fig:miss_arc_2}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/misclassified_samples/sface_unalign/sface_1.drawio.png} 
+    \caption{Example misclassified sample pair for sface without alignment}
+    \label{fig:miss_sf_1}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/misclassified_samples/sface_unalign/sface_2.drawio.png} 
+    \caption{Example misclassified sample pair for sface without alignment}
+    \label{fig:miss_sf_2}
+\end{figure}
+
+
+\section{Additional Remarks}
+The source code used for the evaluation procedure leverages the work of Serengil et al. \cite{deepface}. The implementation of obtaining the F1 score, determining the optimum distance-threshold, and plotting misclassified samples were developed from scratch.
+
+
+\bibliographystyle{unsrt}
+\bibliography{ref}
+
+
+\end{document}
